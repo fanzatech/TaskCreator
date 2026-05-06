@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -230,9 +231,10 @@ private fun TaskDetailScreen(
                             onTimerChanged(accumulatedMillis, runningStartTimestamp, true)
                         },
                         enabled = !isTimerRunning,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
-                        Text("Start Task")
+                        Text("Start Task", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                     Button(
                         onClick = {
@@ -244,9 +246,10 @@ private fun TaskDetailScreen(
                             onTimerChanged(latest, startedTimestamp, false)
                         },
                         enabled = isTimerRunning,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
-                        Text("End Task")
+                        Text("End Task", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Row(
@@ -262,9 +265,10 @@ private fun TaskDetailScreen(
                             isTimerRunning = false
                             onTimerChanged(0L, 0L, false)
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
-                        Text("Reset Timer")
+                        Text("Reset Timer", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                     Button(
                         onClick = {
@@ -272,9 +276,10 @@ private fun TaskDetailScreen(
                             onMarkIncomplete(latest, startedTs, isRunning)
                         },
                         enabled = isCompleted,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
-                        Text("Mark Incomplete")
+                        Text("Mark Incomplete", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
