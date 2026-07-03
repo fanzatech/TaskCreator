@@ -37,7 +37,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.TimeZone
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,6 +61,8 @@ fun CompletedTasksScreen(
             val data = result.data
             val taskId = data?.getIntExtra(TaskDetailActivity.RESULT_TASK_ID, -1) ?: -1
             val updatedMillis = data?.getLongExtra(TaskDetailActivity.RESULT_LINKED_MILLIS, -1L) ?: -1L
+            val startedTimestamp = data?.getLongExtra(TaskDetailActivity.RESULT_STARTED_TIMESTAMP, -1L) ?: -1L
+            val isTimerRunning = data?.getBooleanExtra(TaskDetailActivity.RESULT_TIMER_LINKED, false) ?: false
             val markIncomplete = data?.getBooleanExtra(TaskDetailActivity.RESULT_MARK_INCOMPLETE, false) ?: false
             if (taskId >= 0) {
                 val updatedTasks = tasksList.value.map { task ->
@@ -67,6 +71,8 @@ fun CompletedTasksScreen(
                     } else {
                         task.copy(
                             linkedElapsedMillis = if (updatedMillis >= 0L) updatedMillis else task.linkedElapsedMillis,
+                            startedTimestamp = if (startedTimestamp >= 0L) startedTimestamp else task.startedTimestamp,
+                            isTimerLinked = isTimerRunning,
                             isCompleted = if (markIncomplete) false else task.isCompleted
                         )
                     }
@@ -137,6 +143,7 @@ fun CompletedTasksScreen(
                                         putExtra(TaskDetailActivity.EXTRA_TASK_COMPLETED, task.isCompleted)
                                         putExtra(TaskDetailActivity.EXTRA_TASK_LINKED_MILLIS, task.linkedElapsedMillis)
                                         putExtra(TaskDetailActivity.EXTRA_TASK_TIMER_LINKED, task.isTimerLinked)
+                                        putExtra(TaskDetailActivity.EXTRA_TASK_STARTED_TIMESTAMP, task.startedTimestamp)
                                     }
                                     taskDetailLauncher.launch(detailIntent)
                                 },
@@ -174,11 +181,12 @@ private fun exportTasksToCsv(context: android.content.Context, tasks: List<Task>
     return try {
         val fileName = "completed_tasks_${System.currentTimeMillis()}.csv"
         val csvContent = buildString {
-            appendLine("ID,Name,Description,Completed,Time Spent (hh:mm:ss)")
+            appendLine("ID,Name,Description,Completed,Start Date & Time,Time Spent (hh:mm:ss)")
             tasks.forEach { task ->
                 val name = task.name.replace("\"", "\"\"")
                 val description = task.description.replace("\"", "\"\"")
-                appendLine("${task.id},\"$name\",\"$description\",${task.isCompleted},${formatElapsedCompleted(task.linkedElapsedMillis)}")
+                val startedAt = formatDateTimeEastern(task.startedTimestamp).replace("\"", "\"\"")
+                appendLine("${task.id},\"$name\",\"$description\",${task.isCompleted},\"$startedAt\",${formatElapsedCompleted(task.linkedElapsedMillis)}")
             }
         }
 
@@ -214,4 +222,11 @@ private fun formatElapsedCompleted(elapsedMillis: Long): String {
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
     return String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+}
+
+private fun formatDateTimeEastern(timestampMillis: Long): String {
+    if (timestampMillis == 0L) return "Not started"
+    val formatter = SimpleDateFormat("MMM dd, yyyy hh:mm:ss a", Locale.getDefault())
+    formatter.timeZone = TimeZone.getTimeZone("US/Eastern")
+    return formatter.format(java.util.Date(timestampMillis))
 }

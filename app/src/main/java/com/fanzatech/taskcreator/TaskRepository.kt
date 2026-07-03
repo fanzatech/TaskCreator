@@ -15,6 +15,8 @@ class TaskRepository private constructor(
         entities.map { it.toTask() }
     }
 
+    suspend fun getTaskById(taskId: Int): Task? = dao.getById(taskId)?.toTask()
+
     suspend fun upsertTask(task: Task) {
         dao.upsert(task.toEntity())
     }

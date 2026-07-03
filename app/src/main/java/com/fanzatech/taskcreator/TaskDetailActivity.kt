@@ -25,7 +25,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,9 +32,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.fanzatech.taskcreator.ui.theme.TaskCreatorTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -46,59 +50,105 @@ class TaskDetailActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
-        val taskName = intent.getStringExtra(EXTRA_TASK_NAME).orEmpty()
-        val taskDescription = intent.getStringExtra(EXTRA_TASK_DESCRIPTION).orEmpty()
-        val isCompleted = intent.getBooleanExtra(EXTRA_TASK_COMPLETED, false)
-        val linkedMillis = intent.getLongExtra(EXTRA_TASK_LINKED_MILLIS, 0L)
-        val initialStartedTimestamp = intent.getLongExtra(EXTRA_TASK_STARTED_TIMESTAMP, 0L)
-        val initialIsTimerRunning = intent.getBooleanExtra(EXTRA_TASK_TIMER_LINKED, false)
+        val fallbackTaskName = intent.getStringExtra(EXTRA_TASK_NAME).orEmpty()
+        val fallbackTaskDescription = intent.getStringExtra(EXTRA_TASK_DESCRIPTION).orEmpty()
+        val fallbackIsCompleted = intent.getBooleanExtra(EXTRA_TASK_COMPLETED, false)
+        val fallbackLinkedMillis = intent.getLongExtra(EXTRA_TASK_LINKED_MILLIS, 0L)
+        val fallbackStartedTimestamp = intent.getLongExtra(EXTRA_TASK_STARTED_TIMESTAMP, 0L)
+        val fallbackIsTimerRunning = intent.getBooleanExtra(EXTRA_TASK_TIMER_LINKED, false)
+        val repository = TaskRepository.getInstance(this)
 
-        setContent {
-            TaskCreatorTheme {
-                TaskDetailScreen(
-                    taskName = taskName,
-                    taskDescription = taskDescription,
-                    isCompleted = isCompleted,
-                    initialLinkedMillis = linkedMillis,
-                    initialStartedTimestamp = initialStartedTimestamp,
-                    initialIsTimerRunning = initialIsTimerRunning,
-                    onBack = { latestElapsedMillis, startedTs, isRunning ->
-                        setResult(
-                            RESULT_OK,
-                            Intent().apply {
-                                putExtra(RESULT_TASK_ID, taskId)
-                                putExtra(RESULT_LINKED_MILLIS, latestElapsedMillis)
-                                putExtra(RESULT_STARTED_TIMESTAMP, startedTs)
-                                putExtra(RESULT_TIMER_LINKED, isRunning)
-                            }
+        lifecycleScope.launch {
+            val currentTask = withContext(Dispatchers.IO) {
+                if (taskId >= 0) repository.getTaskById(taskId) else null
+            }
+
+            val taskName = currentTask?.name ?: fallbackTaskName
+            val taskDescription = currentTask?.description ?: fallbackTaskDescription
+            val isCompleted = currentTask?.isCompleted ?: fallbackIsCompleted
+            val linkedMillis = currentTask?.linkedElapsedMillis ?: fallbackLinkedMillis
+            val initialStartedTimestamp = currentTask?.startedTimestamp ?: fallbackStartedTimestamp
+            val initialIsTimerRunning = currentTask?.isTimerLinked ?: fallbackIsTimerRunning
+
+            fun persistTaskState(
+                latestElapsedMillis: Long,
+                startedTs: Long,
+                isRunning: Boolean,
+                completed: Boolean = isCompleted,
+                onSaved: (() -> Unit)? = null
+            ) {
+                if (taskId < 0) return
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) {
+                        repository.upsertTask(
+                            Task(
+                                id = taskId,
+                                name = taskName,
+                                description = taskDescription,
+                                isCompleted = completed,
+                                linkedElapsedMillis = latestElapsedMillis,
+                                isTimerLinked = isRunning,
+                                isDeleted = false,
+                                startedTimestamp = startedTs
+                            )
                         )
-                        finish()
-                    },
-                    onTimerChanged = { updatedMillis, startedTs, isRunning ->
-                        setResult(
-                            RESULT_OK,
-                            Intent().apply {
-                                putExtra(RESULT_TASK_ID, taskId)
-                                putExtra(RESULT_LINKED_MILLIS, updatedMillis)
-                                putExtra(RESULT_STARTED_TIMESTAMP, startedTs)
-                                putExtra(RESULT_TIMER_LINKED, isRunning)
-                            }
-                        )
-                    },
-                    onMarkIncomplete = { latestElapsedMillis, startedTs, isRunning ->
-                        setResult(
-                            RESULT_OK,
-                            Intent().apply {
-                                putExtra(RESULT_TASK_ID, taskId)
-                                putExtra(RESULT_LINKED_MILLIS, latestElapsedMillis)
-                                putExtra(RESULT_STARTED_TIMESTAMP, startedTs)
-                                putExtra(RESULT_TIMER_LINKED, isRunning)
-                                putExtra(RESULT_MARK_INCOMPLETE, true)
-                            }
-                        )
-                        finish()
                     }
-                )
+                    onSaved?.invoke()
+                }
+            }
+
+            setContent {
+                TaskCreatorTheme {
+                    TaskDetailScreen(
+                        taskName = taskName,
+                        taskDescription = taskDescription,
+                        isCompleted = isCompleted,
+                        initialLinkedMillis = linkedMillis,
+                        initialStartedTimestamp = initialStartedTimestamp,
+                        initialIsTimerRunning = initialIsTimerRunning,
+                        onBack = { latestElapsedMillis, startedTs, isRunning ->
+                            persistTaskState(latestElapsedMillis, startedTs, isRunning) {
+                                setResult(
+                                    RESULT_OK,
+                                    Intent().apply {
+                                        putExtra(RESULT_TASK_ID, taskId)
+                                        putExtra(RESULT_LINKED_MILLIS, latestElapsedMillis)
+                                        putExtra(RESULT_STARTED_TIMESTAMP, startedTs)
+                                        putExtra(RESULT_TIMER_LINKED, isRunning)
+                                    }
+                                )
+                                finish()
+                            }
+                        },
+                        onTimerChanged = { updatedMillis, startedTs, isRunning ->
+                            persistTaskState(updatedMillis, startedTs, isRunning)
+                            setResult(
+                                RESULT_OK,
+                                Intent().apply {
+                                    putExtra(RESULT_TASK_ID, taskId)
+                                    putExtra(RESULT_LINKED_MILLIS, updatedMillis)
+                                    putExtra(RESULT_STARTED_TIMESTAMP, startedTs)
+                                    putExtra(RESULT_TIMER_LINKED, isRunning)
+                                }
+                            )
+                        },
+                        onMarkIncomplete = { latestElapsedMillis, startedTs, isRunning ->
+                            persistTaskState(latestElapsedMillis, startedTs, isRunning, completed = false) {
+                                setResult(
+                                    RESULT_OK,
+                                    Intent().apply {
+                                        putExtra(RESULT_TASK_ID, taskId)
+                                        putExtra(RESULT_LINKED_MILLIS, latestElapsedMillis)
+                                        putExtra(RESULT_STARTED_TIMESTAMP, startedTs)
+                                        putExtra(RESULT_TIMER_LINKED, isRunning)
+                                        putExtra(RESULT_MARK_INCOMPLETE, true)
+                                    }
+                                )
+                                finish()
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -140,6 +190,7 @@ private fun TaskDetailScreen(
     var startedTimestamp by rememberSaveable { mutableStateOf(initialStartedTimestamp) }
     var isTimerRunning by rememberSaveable { mutableStateOf(initialIsTimerRunning) }
     var elapsedMillis by rememberSaveable { mutableStateOf(initialLinkedMillis) }
+    val actionsEnabled = !isCompleted
 
     val latestElapsed = {
         if (isTimerRunning && runningStartTimestamp > 0L) {
@@ -170,12 +221,13 @@ private fun TaskDetailScreen(
         }
     }
 
-    val handleBack = {
+    fun handleBack() {
+        if (isTimerRunning) return
         val (latest, startedTs, isRunning) = checkpoint()
         onBack(latest, startedTs, isRunning)
     }
 
-    BackHandler(onBack = handleBack)
+    BackHandler(onBack = ::handleBack)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -183,7 +235,10 @@ private fun TaskDetailScreen(
             TopAppBar(
                 title = { Text("Task Details") },
                 navigationIcon = {
-                    IconButton(onClick = handleBack) {
+                    IconButton(
+                        onClick = ::handleBack,
+                        enabled = !isTimerRunning
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
@@ -230,7 +285,7 @@ private fun TaskDetailScreen(
                             isTimerRunning = true
                             onTimerChanged(accumulatedMillis, runningStartTimestamp, true)
                         },
-                        enabled = !isTimerRunning,
+                        enabled = actionsEnabled && !isTimerRunning,
                         modifier = Modifier.weight(1f),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
@@ -245,7 +300,7 @@ private fun TaskDetailScreen(
                             isTimerRunning = false
                             onTimerChanged(latest, startedTimestamp, false)
                         },
-                        enabled = isTimerRunning,
+                        enabled = actionsEnabled && isTimerRunning,
                         modifier = Modifier.weight(1f),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
@@ -265,6 +320,7 @@ private fun TaskDetailScreen(
                             isTimerRunning = false
                             onTimerChanged(0L, 0L, false)
                         },
+                        enabled = actionsEnabled,
                         modifier = Modifier.weight(1f),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
@@ -275,7 +331,7 @@ private fun TaskDetailScreen(
                             val (latest, startedTs, isRunning) = checkpoint()
                             onMarkIncomplete(latest, startedTs, isRunning)
                         },
-                        enabled = isCompleted,
+                        enabled = actionsEnabled && isCompleted,
                         modifier = Modifier.weight(1f),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
