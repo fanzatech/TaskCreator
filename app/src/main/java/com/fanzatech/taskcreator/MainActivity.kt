@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import com.fanzatech.taskcreator.ui.theme.TaskCreatorTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -180,6 +182,50 @@ fun TaskInputField(
         }
     }
 
+    val taskEditLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val taskId = data?.getIntExtra(TaskEditActivity.RESULT_TASK_ID, -1) ?: -1
+            val updatedName = data?.getStringExtra(TaskEditActivity.RESULT_TASK_NAME).orEmpty()
+            val updatedDescription = data?.getStringExtra(TaskEditActivity.RESULT_TASK_DESCRIPTION).orEmpty()
+            if (taskId >= 0 && updatedName.isNotBlank()) {
+                onTasksChanged(
+                    tasksList.value.map { task ->
+                        if (task.id == taskId) {
+                            task.copy(name = updatedName, description = updatedDescription)
+                        } else {
+                            task
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    val launchTaskDetail: (Task) -> Unit = { task ->
+        val detailIntent = Intent(context, TaskDetailActivity::class.java).apply {
+            putExtra(TaskDetailActivity.EXTRA_TASK_ID, task.id)
+            putExtra(TaskDetailActivity.EXTRA_TASK_NAME, task.name)
+            putExtra(TaskDetailActivity.EXTRA_TASK_DESCRIPTION, task.description)
+            putExtra(TaskDetailActivity.EXTRA_TASK_COMPLETED, task.isCompleted)
+            putExtra(TaskDetailActivity.EXTRA_TASK_LINKED_MILLIS, task.linkedElapsedMillis)
+            putExtra(TaskDetailActivity.EXTRA_TASK_TIMER_LINKED, task.isTimerLinked)
+            putExtra(TaskDetailActivity.EXTRA_TASK_STARTED_TIMESTAMP, task.startedTimestamp)
+        }
+        taskDetailLauncher.launch(detailIntent)
+    }
+
+    val launchTaskEdit: (Task) -> Unit = { task ->
+        val editIntent = Intent(context, TaskEditActivity::class.java).apply {
+            putExtra(TaskEditActivity.EXTRA_TASK_ID, task.id)
+            putExtra(TaskEditActivity.EXTRA_TASK_NAME, task.name)
+            putExtra(TaskEditActivity.EXTRA_TASK_DESCRIPTION, task.description)
+        }
+        taskEditLauncher.launch(editIntent)
+    }
+
     val hasRunningTasks = tasksList.value.any {
         !it.isCompleted && !it.isDeleted && it.isTimerLinked && it.startedTimestamp > 0L
     }
@@ -264,21 +310,24 @@ fun TaskInputField(
                             taskDescriptionInput.value = ""
                         }
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                 ) {
-                    Text("Add")
+                    Text("Add", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
                 Button(
                     onClick = onNavigateToDeleted,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                 ) {
-                    Text("Delete")
+                    Text("Delete", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
                 Button(
                     onClick = onNavigateToCompleted,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                 ) {
-                    Text("Complete")
+                    Text("Complete", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
             }
 
@@ -290,6 +339,11 @@ fun TaskInputField(
                 )
                 Text(
                     text = "Tap a task row to view details",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                Text(
+                    text = "Press and hold a task row for more than 1 second to edit it",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
@@ -315,6 +369,7 @@ fun TaskInputField(
                     val headerColor = MaterialTheme.colorScheme.surfaceVariant
                     val swipeCompleteColor = Color(0xFF2E7D32).copy(alpha = 0.55f)
                     val swipeDeleteColor = Color(0xFFC62828).copy(alpha = 0.55f)
+                    val editHoldColor = Color(0xFFEF6C00).copy(alpha = 0.55f)
 
                     // Table header
                     Row(
@@ -358,6 +413,7 @@ fun TaskInputField(
                     ) {
                         items(activeTasks, key = { it.id }) { task ->
                             val swipeDistancePx = remember(task.id) { mutableStateOf(0f) }
+                            val isEditHoldActive = remember(task.id) { mutableStateOf(false) }
 
                             Box(
                                 modifier = Modifier
@@ -367,6 +423,7 @@ fun TaskInputField(
                                         when {
                                             swipeDistancePx.value > 0f -> Modifier.background(swipeCompleteColor)
                                             swipeDistancePx.value < 0f -> Modifier.background(swipeDeleteColor)
+                                            isEditHoldActive.value -> Modifier.background(editHoldColor)
                                             else -> Modifier
                                         }
                                     )
@@ -407,17 +464,41 @@ fun TaskInputField(
                                             }
                                         )
                                     }
-                                    .clickable {
-                                        val detailIntent = Intent(context, TaskDetailActivity::class.java).apply {
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_ID, task.id)
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_NAME, task.name)
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_DESCRIPTION, task.description)
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_COMPLETED, task.isCompleted)
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_LINKED_MILLIS, task.linkedElapsedMillis)
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_TIMER_LINKED, task.isTimerLinked)
-                                            putExtra(TaskDetailActivity.EXTRA_TASK_STARTED_TIMESTAMP, task.startedTimestamp)
-                                        }
-                                        taskDetailLauncher.launch(detailIntent)
+                                    .pointerInput(task.id) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                val pressStart = System.currentTimeMillis()
+                                                isEditHoldActive.value = false
+
+                                                var releasedBeforeThreshold: Boolean? = null
+                                                val completedBeforeThreshold = withTimeoutOrNull(1_001L) {
+                                                    releasedBeforeThreshold = tryAwaitRelease()
+                                                    true
+                                                } ?: false
+
+                                                if (completedBeforeThreshold) {
+                                                    isEditHoldActive.value = false
+                                                    if (releasedBeforeThreshold == true) {
+                                                        launchTaskDetail(task)
+                                                    }
+                                                    return@detectTapGestures
+                                                }
+
+                                                isEditHoldActive.value = true
+                                                val releasedNormally = tryAwaitRelease()
+                                                isEditHoldActive.value = false
+                                                if (!releasedNormally) {
+                                                    return@detectTapGestures
+                                                }
+
+                                                val heldDurationMillis = System.currentTimeMillis() - pressStart
+                                                if (heldDurationMillis > 1_000L) {
+                                                    launchTaskEdit(task)
+                                                } else {
+                                                    launchTaskDetail(task)
+                                                }
+                                            }
+                                        )
                                     }
                             ) {
                                 if (swipeDistancePx.value > 0f) {

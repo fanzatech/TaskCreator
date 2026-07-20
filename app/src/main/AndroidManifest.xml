@@ -15,6 +15,10 @@
             android:name=".TimerService"
             android:exported="false" />
         <activity
+            android:name=".TaskEditActivity"
+            android:exported="false"
+            android:theme="@style/Theme.TaskCreator" />
+        <activity
             android:name=".TaskDetailActivity"
             android:exported="false"
             android:theme="@style/Theme.TaskCreator" />

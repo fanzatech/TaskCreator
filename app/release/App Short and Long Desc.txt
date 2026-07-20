@@ -1,1 +1,7 @@
-Track Task with Details and keep track of time took to complete the task
+Manage and track your task and time to completion in one app 
+
+
+This App help manage task and track time it took to complete user's task. Functionality of this app given below
+
+1) Main Screen Functionality
+	
